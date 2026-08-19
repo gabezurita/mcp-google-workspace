@@ -13,4 +13,4 @@ then
   npm run build > /dev/null 2>&1
 fi
 
-node dist/server.js
+exec node --require ./slowbuffer-compat.cjs dist/server.js
