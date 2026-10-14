@@ -9,8 +9,6 @@ updates:
       include: "scope"
     open-pull-requests-limit: 10
     versioning-strategy: auto
-    assignees:
-      - "gabezurita"
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
@@ -22,5 +20,3 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
-    assignees:
-      - "gabezurita"
