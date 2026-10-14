@@ -28,67 +28,49 @@ jobs:
   dependabot:
     needs: test
     runs-on: ubuntu-latest
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    if: ${{ always() && github.actor == 'dependabot[bot]' }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@v2
         with:
           github-token: '${{ secrets.GITHUB_TOKEN }}'
 
-      - name: Create tracking issue for upgrade
-        if: ${{ steps.metadata.outputs.update-type != 'version-update:semver-major' }}
-        id: create-issue
+      - name: Notify on test failure
+        if: ${{ needs.test.result == 'failure' }}
         run: |
-          PR_TITLE=$(gh pr view "$PR_URL" --json title --jq .title)
-          PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq .number)
-          
-          # Create tracking issue assigned to gabezurita
-          ISSUE_URL=$(gh issue create \
-            --title "chore(deps): track $PR_TITLE" \
-            --body "Automated dependency update tracking for PR #$PR_NUMBER ($PR_URL)." \
-            --assignee gabezurita 2>/dev/null || gh issue create \
-            --title "chore(deps): track $PR_TITLE" \
-            --body "Automated dependency update tracking for PR #$PR_NUMBER ($PR_URL).")
-          
-          echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
+          gh pr edit "$PR_URL" --repo "${{ github.repository }}" --add-assignee gabezurita
+          gh pr comment "$PR_URL" --repo "${{ github.repository }}" --body "❌ Tests failed in CI. Assigned @gabezurita for manual investigation."
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Approve PR
-        if: ${{ steps.metadata.outputs.update-type != 'version-update:semver-major' }}
+      - name: Notify on major upgrade
+        if: ${{ needs.test.result == 'success' && steps.metadata.outputs.update-type == 'version-update:semver-major' }}
         run: |
-          gh pr review --approve --body "Auto-approved: passing test suite verification" "$PR_URL" || true
+          gh pr edit "$PR_URL" --repo "${{ github.repository }}" --add-assignee gabezurita
+          gh pr comment "$PR_URL" --repo "${{ github.repository }}" --body "⚠️ Major version upgrade detected. Auto-merge skipped; assigned @gabezurita for manual review."
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge with Co-Author attribution
-        if: ${{ steps.metadata.outputs.update-type != 'version-update:semver-major' }}
+      - name: Auto-approve and merge
+        if: ${{ needs.test.result == 'success' && steps.metadata.outputs.update-type != 'version-update:semver-major' }}
         run: |
-          PR_TITLE=$(gh pr view "$PR_URL" --json title --jq .title)
-          PR_BODY=$(gh pr view "$PR_URL" --json body --jq .body)
-          ISSUE_URL="${{ steps.create-issue.outputs.issue_url }}"
+          gh pr review --approve --body "Auto-approved: passing test suite verification" "$PR_URL" --repo "${{ github.repository }}" || true
+          
+          PR_TITLE=$(gh pr view "$PR_URL" --repo "${{ github.repository }}" --json title --jq .title)
+          PR_BODY=$(gh pr view "$PR_URL" --repo "${{ github.repository }}" --json body --jq .body)
           
           COAUTH="Co-authored-by: Gabriel Zurita <gabezurita@gmail.com>"
           MERGE_BODY="${PR_BODY}"$'\n\n'"${COAUTH}"
-          if [ -n "$ISSUE_URL" ]; then
-            MERGE_BODY="${MERGE_BODY}"$'\n\n'"Closes ${ISSUE_URL}"
-          fi
           
           gh pr merge --auto --squash \
             --subject "$PR_TITLE" \
             --body "$MERGE_BODY" \
-            "$PR_URL"
+            "$PR_URL" --repo "${{ github.repository }}"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
-
-      - name: Close tracking issue
-        if: ${{ steps.metadata.outputs.update-type != 'version-update:semver-major' && steps.create-issue.outputs.issue_url != '' }}
-        run: |
-          gh issue close "${{ steps.create-issue.outputs.issue_url }}" \
-            --comment "Verified by CI and queued for squash merge via ${{ github.event.pull_request.html_url }}."
-        env:
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
