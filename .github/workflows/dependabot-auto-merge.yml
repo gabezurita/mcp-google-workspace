@@ -4,7 +4,6 @@ on: pull_request_target
 permissions:
   pull-requests: write
   contents: write
-  issues: write
 
 jobs:
   test:
@@ -32,12 +31,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Dependabot metadata
-        id: metadata
-        uses: dependabot/fetch-metadata@v2
-        with:
-          github-token: '${{ secrets.GITHUB_TOKEN }}'
-
       - name: Notify on test failure
         if: ${{ needs.test.result == 'failure' }}
         run: |
@@ -47,17 +40,9 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
 
-      - name: Notify on major upgrade
-        if: ${{ needs.test.result == 'success' && steps.metadata.outputs.update-type == 'version-update:semver-major' }}
-        run: |
-          gh pr edit "$PR_URL" --repo "${{ github.repository }}" --add-assignee gabezurita
-          gh pr comment "$PR_URL" --repo "${{ github.repository }}" --body "⚠️ Major version upgrade detected. Auto-merge skipped; assigned @gabezurita for manual review."
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
-
       - name: Auto-approve and merge
-        if: ${{ needs.test.result == 'success' && steps.metadata.outputs.update-type != 'version-update:semver-major' }}
+        if: ${{ needs.test.result == 'success' }}
+        id: merge
         run: |
           gh pr review --approve --body "Auto-approved: passing test suite verification" "$PR_URL" --repo "${{ github.repository }}" || true
           
@@ -70,7 +55,20 @@ jobs:
           gh pr merge --auto --squash \
             --subject "$PR_TITLE" \
             --body "$MERGE_BODY" \
+            "$PR_URL" --repo "${{ github.repository }}" || \
+          gh pr merge --squash \
+            --subject "$PR_TITLE" \
+            --body "$MERGE_BODY" \
             "$PR_URL" --repo "${{ github.repository }}"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Notify on merge failure
+        if: ${{ needs.test.result == 'success' && failure() }}
+        run: |
+          gh pr edit "$PR_URL" --repo "${{ github.repository }}" --add-assignee gabezurita
+          gh pr comment "$PR_URL" --repo "${{ github.repository }}" --body "❌ Auto-merge failed. Assigned @gabezurita for manual review."
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.DEPENDABOT_PAT || secrets.GITHUB_TOKEN }}

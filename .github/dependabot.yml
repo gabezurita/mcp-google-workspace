@@ -9,9 +9,6 @@ updates:
       include: "scope"
     open-pull-requests-limit: 10
     versioning-strategy: auto
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
