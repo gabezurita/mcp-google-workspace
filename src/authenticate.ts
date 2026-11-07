@@ -20,6 +20,9 @@ Options:
   --accounts-file <path> Path to accounts config file (default: ./.accounts.json)
   --credentials-dir <dir> Directory to store credentials (default: .)
   --help                 Show this help message
+
+Set GOOGLE_WORKSPACE_DRIVE_DOCS_ONLY=true to request only identity and read-only
+Drive/Docs scopes and store a separate .oauth2.drive-docs.<email>.json token.
 `.trim();
 
 function printUsage(): void {
@@ -100,12 +103,14 @@ async function authenticateAccount(gauth: GAuthService, email: string, force: bo
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(`<h1>Warning</h1><p>Authenticated as ${userInfo.email} instead of ${email}. Credentials saved for ${userInfo.email}.</p>`);
           console.warn(`Warning: authenticated as ${userInfo.email} instead of ${email}`);
-          console.log(`Credentials saved for ${userInfo.email} to ${gauth.getConfig().credentialsDir}/.oauth2.${userInfo.email}.json`);
+          const profile = gauth.getConfig().driveDocsOnly ? 'drive-docs.' : '';
+          console.log(`Credentials saved for ${userInfo.email} to ${gauth.getConfig().credentialsDir}/.oauth2.${profile}${userInfo.email}.json`);
         } else {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end('<h1>Authentication successful!</h1><p>You can close this tab.</p>');
           console.log(`Authenticated: ${email}`);
-          console.log(`Credentials saved to ${gauth.getConfig().credentialsDir}/.oauth2.${email}.json`);
+          const profile = gauth.getConfig().driveDocsOnly ? 'drive-docs.' : '';
+          console.log(`Credentials saved to ${gauth.getConfig().credentialsDir}/.oauth2.${profile}${email}.json`);
         }
         cleanup();
         resolve(true);
@@ -171,6 +176,7 @@ async function main(): Promise<void> {
     gauthFile: values['gauth-file'] as string,
     accountsFile: values['accounts-file'] as string,
     credentialsDir: values['credentials-dir'] as string,
+    driveDocsOnly: process.env.GOOGLE_WORKSPACE_DRIVE_DOCS_ONLY === 'true'
   };
 
   const gauth = new GAuthService(config);
