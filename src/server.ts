@@ -15,6 +15,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { GmailTools } from './tools/gmail.js';
 import { CalendarTools } from './tools/calendar.js';
+import { DriveTools } from './tools/drive.js';
+import { isDriveDocsTool } from './tools/drive-helpers.js';
 import { GAuthService } from './services/gauth.js';
 
 // Configure logging
@@ -30,6 +32,7 @@ interface ServerConfig {
   gauthFile: string;
   accountsFile: string;
   credentialsDir: string;
+  driveDocsOnly: boolean;
 }
 
 class OAuthServer {
@@ -73,15 +76,18 @@ class OAuthServer {
 class GoogleWorkspaceServer {
   private server: Server;
   private gauth: GAuthService;
+  private readonly driveDocsOnly: boolean;
   private tools!: {
     gmail: GmailTools;
     calendar: CalendarTools;
+    drive: DriveTools;
   };
 
   constructor(config: ServerConfig) {
     logger.info('Starting Google Workspace MCP Server...');
 
     // Initialize services
+    this.driveDocsOnly = config.driveDocsOnly;
     this.gauth = new GAuthService(config);
     
     // Initialize server
@@ -95,7 +101,8 @@ class GoogleWorkspaceServer {
     // Initialize tools after OAuth2 client is ready
     this.tools = {
       gmail: new GmailTools(this.gauth),
-      calendar: new CalendarTools(this.gauth)
+      calendar: new CalendarTools(this.gauth),
+      drive: new DriveTools(this.gauth.getClient())
     };
 
     this.setupHandlers();
@@ -136,12 +143,13 @@ class GoogleWorkspaceServer {
   private setupHandlers() {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: [
-          ...this.tools.gmail.getTools(),
-          ...this.tools.calendar.getTools()
-        ]
-      };
+      const tools = [
+        ...this.tools.gmail.getTools(),
+        ...this.tools.calendar.getTools(),
+        ...this.tools.drive.getTools()
+      ];
+
+      return { tools: this.driveDocsOnly ? tools.filter(tool => isDriveDocsTool(tool.name)) : tools };
     });
 
     // Handle tool calls
@@ -149,6 +157,16 @@ class GoogleWorkspaceServer {
       const { name, arguments: args } = request.params;
       
       try {
+        if (this.driveDocsOnly && !isDriveDocsTool(name)) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify({
+              error: `Tool ${name} is unavailable in Drive/Docs-only mode`,
+              success: false
+            }, null, 2) }]
+          };
+        }
+
         if (typeof args !== 'object' || args === null) {
           return {
             isError: true,
@@ -168,6 +186,8 @@ class GoogleWorkspaceServer {
               result = await this.tools.gmail.handleTool(name, args);
             } else if (name.startsWith('calendar_')) {
               result = await this.tools.calendar.handleTool(name, args);
+            } else if (name.startsWith('drive_') || name.startsWith('docs_')) {
+              result = await this.tools.drive.handleTool(name, args);
             } else {
               throw new Error(`Unknown tool: ${name}`);
             }
@@ -216,6 +236,8 @@ class GoogleWorkspaceServer {
             result = await this.tools.gmail.handleTool(name, args);
           } else if (name.startsWith('calendar_')) {
             result = await this.tools.calendar.handleTool(name, args);
+          } else if (name.startsWith('drive_') || name.startsWith('docs_')) {
+            result = await this.tools.drive.handleTool(name, args);
           } else {
             throw new Error(`Unknown tool: ${name}`);
           }
@@ -286,7 +308,8 @@ const { values } = parseArgs({
 const config: ServerConfig = {
   gauthFile: values['gauth-file'] as string,
   accountsFile: values['accounts-file'] as string,
-  credentialsDir: values['credentials-dir'] as string
+  credentialsDir: values['credentials-dir'] as string,
+  driveDocsOnly: process.env.GOOGLE_WORKSPACE_DRIVE_DOCS_ONLY === 'true'
 };
 
 // Start the server

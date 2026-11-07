@@ -10,9 +10,17 @@ const REDIRECT_URI = 'http://localhost:4100/code';
 const SCOPES = [
   'openid',
   'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/gmail.modify',
+  'https://mail.google.com/',
   'https://www.googleapis.com/auth/gmail.settings.basic',
-  'https://www.googleapis.com/auth/calendar'
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/documents.readonly'
+];
+const DRIVE_DOCS_ONLY_SCOPES = [
+  'openid',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/documents.readonly'
 ];
 
 export interface AccountInfo {
@@ -27,6 +35,7 @@ interface ServerConfig {
   gauthFile: string;
   accountsFile: string;
   credentialsDir: string;
+  driveDocsOnly?: boolean;
 }
 
 class AccountInfoImpl implements AccountInfo {
@@ -92,7 +101,8 @@ export class GAuthService {
   }
 
   private getCredentialFilename(userId: string): string {
-    const credPath = path.resolve(this.config.credentialsDir, `.oauth2.${userId}.json`);
+    const profile = this.config.driveDocsOnly ? 'drive-docs.' : '';
+    const credPath = path.resolve(this.config.credentialsDir, `.oauth2.${profile}${userId}.json`);
     const credDir = path.resolve(this.config.credentialsDir);
     if (!credPath.startsWith(credDir + path.sep) && credPath !== credDir) {
       throw new Error('Invalid user ID');
@@ -180,7 +190,7 @@ export class GAuthService {
 
     return this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
-      scope: SCOPES,
+      scope: this.config.driveDocsOnly ? DRIVE_DOCS_ONLY_SCOPES : SCOPES,
       state: JSON.stringify(state),
       prompt: 'consent',
       login_hint: emailAddress

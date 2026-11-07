@@ -1,6 +1,6 @@
 # MCP Google Workspace Server
 
-A Model Context Protocol server for Google Workspace services. This server provides tools to interact with Gmail and Google Calendar through the MCP protocol.
+A Model Context Protocol server for Google Workspace services. It provides Gmail and Calendar tools, plus read-only Google Drive search, metadata, and Google Docs text retrieval.
 
 ## Features
 
@@ -25,6 +25,13 @@ A Model Context Protocol server for Google Workspace services. This server provi
   - Support for multiple calendars
   - Custom timezone support
 
+- **Read-only Google Drive and Docs**
+  - Search Drive by file name or full text with bounded, paginated results
+  - Retrieve Drive file metadata by ID
+  - Retrieve readable Google Docs text from paragraphs, tables, and tabs
+  - No Drive or Docs write tools
+  - Drive/Docs-only mode hides Gmail and Calendar tools and requests only identity and read-only Drive/Docs scopes
+
 ## Example Prompts
 
 Try these example prompts with your AI assistant:
@@ -42,10 +49,16 @@ Try these example prompts with your AI assistant:
 - "Check my private account's Family agenda for next week"
 - "I need to plan an event with Tim for 2hrs next week. Suggest some time slots"
 
+### Drive and Docs
+- "Search Drive for files whose names contain budget"
+- "Search Drive file contents for project plan"
+- "Get the metadata for Drive file ID file-123"
+- "Retrieve the text of Google Doc ID document-123"
+
 ## Prerequisites
 
 - Node.js >= 20
-- A Google Cloud project with Gmail and Calendar APIs enabled
+- A Google Cloud project with the APIs enabled for the selected mode: Gmail and Calendar for full mode, or Drive and Docs for Drive/Docs-only mode
 - OAuth 2.0 credentials for Google APIs
 
 ## Installation
@@ -75,22 +88,38 @@ Google Workspace (G Suite) APIs require OAuth2 authorization. Follow these steps
 1. Create OAuth2 Credentials:
    - Go to the [Google Cloud Console](https://console.cloud.google.com/)
    - Create a new project or select an existing one
-   - Enable the Gmail API and Google Calendar API for your project
+   - Enable the Gmail API, Google Calendar API, Google Drive API, and Google Docs API for full mode. Drive/Docs-only mode needs the Google Drive API and Google Docs API.
    - Go to "Credentials" → "Create Credentials" → "OAuth client ID"
    - Select "Desktop app" or "Web application" as the application type
    - Configure the OAuth consent screen with required information
    - Add authorized redirect URIs (include `http://localhost:4100/code` for local development)
 
-2. Required OAuth2 Scopes:
+2. OAuth2 scopes depend on the selected server mode.
+
+   Full mode retains the existing Gmail and Calendar permissions and adds read-only Drive/Docs access:
    ```json
    [
      "openid",
+     "https://www.googleapis.com/auth/userinfo.email",
      "https://mail.google.com/",
      "https://www.googleapis.com/auth/gmail.settings.basic",
      "https://www.googleapis.com/auth/calendar",
-     "https://www.googleapis.com/auth/userinfo.email"
+     "https://www.googleapis.com/auth/drive.metadata.readonly",
+     "https://www.googleapis.com/auth/documents.readonly"
    ]
    ```
+
+   Drive/Docs-only mode requests only identity and read-only Drive/Docs scopes:
+   ```json
+   [
+     "openid",
+     "https://www.googleapis.com/auth/userinfo.email",
+     "https://www.googleapis.com/auth/drive.metadata.readonly",
+     "https://www.googleapis.com/auth/documents.readonly"
+   ]
+   ```
+
+   Drive/Docs-only mode uses a separate `.oauth2.drive-docs.<email>.json` token, so it does not replace a full-mode token. Full mode is not read-only overall because Gmail and Calendar retain their existing permissions.
 
 3. Create a `.gauth.json` file in the project root with your Google OAuth 2.0 credentials:
    ```json
@@ -137,7 +166,10 @@ This opens a browser for each configured account to complete the OAuth consent f
 npm run authenticate -- user@gmail.com
 
 # Force re-authentication (e.g. after OAuth scope changes)
-npm run authenticate -- user@gmail.com --force
+npm run authenticate -- --force user@gmail.com
+
+# Request a separate read-only Drive/Docs token
+GOOGLE_WORKSPACE_DRIVE_DOCS_ONLY=true npm run authenticate -- --force user@gmail.com
 
 # Custom config paths (same flags as the server)
 npm run authenticate -- --gauth-file /path/to/.gauth.json --accounts-file /path/to/.accounts.json
@@ -223,13 +255,14 @@ Do not bake `.gauth.json`, `.accounts.json`, OAuth tokens, or `.env` files into 
 3. On first run for each account, it will:
    - Open a browser window for OAuth2 authentication
    - Listen on port 4100 for the OAuth2 callback
-   - Store the credentials for future use in a file named `.oauth2.{email}.json`
+   - Store the credentials for future use in `.oauth2.{email}.json` (full mode) or `.oauth2.drive-docs.{email}.json` (Drive/Docs-only mode)
 
 ### Environment Variables
 
 - `GMAIL_ALLOW_SENDING` — set to `true` to allow `gmail_send` to actually send mail. Defaults to disabled.
 - `GMAIL_ALLOW_DRAFTS` — set to `true` to allow draft creation tools. Defaults to disabled.
 - `GMAIL_ATTACHMENTS_DIR` — base directory under which `gmail_get_attachment` and `gmail_bulk_save_attachments` may write files. Attachment paths supplied by the caller are treated as relative to this directory; absolute paths, traversal, and symlinks that escape the directory are rejected. Defaults to `~/.mcp-gsuite/attachments`.
+- `GOOGLE_WORKSPACE_DRIVE_DOCS_ONLY` — set to `true` to expose only read-only Drive/Docs tools, request only identity and read-only Drive/Docs OAuth scopes, and use the separate Drive/Docs credential file. Defaults to `false`.
 
 ## Available Tools
 
@@ -305,6 +338,21 @@ Do not bake `.gauth.json`, `.accounts.json`, OAuth tokens, or `.env` files into 
    - Delete events by ID
    - Option for cancellation notifications
 
+### Google Drive and Docs Tools
+
+These three tools are available in both modes. Drive/Docs-only mode exposes no Gmail, Calendar, or write-capable tools.
+
+1. `drive_search_files`
+   - Search file names (`name`) or file contents (`fullText`)
+   - Return between 1 and 100 metadata results per page, with a next-page token when available
+
+2. `drive_get_file_metadata`
+   - Retrieve metadata for a Drive file by ID
+
+3. `docs_get_document`
+   - Retrieve readable text from a Google Doc's body, tables, and all tabs
+   - Returns text in the MCP response; it does not create or export a Drive file
+
 ## Development
 
 - Source code is in TypeScript under the `src/` directory
@@ -322,7 +370,8 @@ mcp-google-workspace/
 │   │   └── gauth.ts        # Google authentication service
 │   ├── tools/
 │   │   ├── gmail.ts        # Gmail tools implementation
-│   │   └── calendar.ts     # Calendar tools implementation
+│   │   ├── calendar.ts     # Calendar tools implementation
+│   │   └── drive.ts        # Read-only Drive and Docs tools
 │   └── types/
 │       └── tool-handler.ts # Common types and interfaces
 ├── .gauth.json             # OAuth2 credentials
